@@ -42,23 +42,36 @@ deployed at https://klylo-video-queue.vercel.app.
 - [x] `npm run test:realtime` — 5/5
 - [x] `npm run test:worker` — 7/7 locally and against the deployment; both the `done` and
       the `failed` branch observed
-- [x] `npm run test:ui` — 23/23 against a local production build and against the deployment:
+- [x] `npm run test:ui` — 23/23 against a local production build (browser pinned to
+      `Asia/Tokyo`/`ja-JP` so it runs in a timezone that differs from the renderer's):
       sign-up, form validation, job submission with a real upload, signed images decoding in
       the browser, live status, out-of-band realtime update, Retry, the dashboard error
-      banner, timestamp hydration, sign-out and sign-back-in
+      banner, timestamp hydration, sign-out and sign-back-in.
+      Not yet re-run green against the deployment — see the stalled-deploy item below.
 - [x] Fixed a hydration mismatch (React #418) the UI suite surfaced in production only:
       `toLocaleString()` during render disagreed between Vercel's UTC and the viewer's
-      timezone. Now `components/local_time.tsx` via `useSyncExternalStore`.
+      timezone. Now `components/local_time.tsx` via `useSyncExternalStore`. Verified against
+      a local production build; **unverified in production** while the deploy is stalled.
 - [x] CI: `.github/workflows/ci.yml` runs lint + build on push and pull request
 - [x] Public GitHub repo + Vercel deploy with the two `NEXT_PUBLIC_*` env vars (the Supabase
       Vercel integration is deliberately *not* used — it injects a `service_role` key)
 
 ## Remaining (owner-gated)
 
-- [ ] **Owner runs:** purge the take-home brief from git history. It is untracked and
-      gitignored at the tip but still visible in commit `f2e6f58`. A history rewrite is
-      blocked in auto mode, so:
-      `FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --index-filter 'git rm --cached --ignore-unmatch klylo-dev-assignment.md' --prune-empty -- --all`
-      then `git push --force origin main`. Force-push (not delete-and-recreate) keeps the
-      Vercel <-> GitHub link intact; Vercel redeploys automatically.
+- [ ] **Owner runs:** finish purging the take-home brief from GitHub. The `filter-branch`
+      + force-push is done: the brief is gone from every commit reachable from `main` and
+      `origin/main`, and the local clone is fully purged (`refs/original/*` deleted,
+      reflog expired, `git gc --prune=now`). What remains is GitHub's own unreachable-object
+      cache — `GET /repos/:owner/:repo/contents/klylo-dev-assignment.md?ref=f2e6f58` still
+      serves the file. Only the owner can clear it: delete and recreate the repository
+      (guaranteed, ~2 min to relink Vercel), or open a GitHub Support ticket asking them to
+      garbage-collect. The `gh` token here has scopes `gist, read:org, repo, workflow` —
+      no `delete_repo` — so this cannot be automated from the agent.
+- [ ] **Owner checks:** Vercel has stopped producing deployments. The last one is `5e0382d`
+      at 2026-09-02T07:34Z; the four commits pushed at 07:45 (`4c3e784`, `1efbfdd`,
+      `68fe07f`, `8856abc`) created no deployment record at all and the commit status stays
+      `pending` with zero statuses. The GitHub link is not broken by the force-push — it
+      deployed `5e0382d` fine afterwards. Consequence: the live site still serves the
+      pre-hydration-fix build. Needs the Vercel dashboard (build logs / redeploy) or a
+      `VERCEL_TOKEN`; no Vercel CLI or credentials exist on this machine.
 - [ ] Turn *Confirm email* back ON once the reviewer is finished.
