@@ -27,3 +27,26 @@ status change live.
   conditional status update so a job cannot be processed twice.
 - `result_url` stores the Storage object path; the UI mints short-lived signed URLs
   (bucket is private, so a stored URL would expire anyway).
+
+## Verification & delivery (owner-gated)
+
+Implementation is complete, committed, lint-clean and build-clean. The app has **never run
+against a live Supabase project** — everything below needs one, and creating it is gated on
+the repo owner (the CLI call to provision cloud infra is blocked in auto mode).
+
+- [ ] **Owner runs:** `npx supabase projects create klylo-video-queue --org-id aljwybsnhpqpcuvzamss --db-password <in .env.local as SUPABASE_DB_PASSWORD> --region ap-southeast-1`
+- [ ] `supabase link --project-ref <ref>` then `supabase db push` (fallback: paste
+      `supabase/migrations/20260902120000_init.sql` into the dashboard SQL editor — that is
+      how the reviewer runs it anyway)
+- [ ] Fill real `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `.env.local`
+      (`supabase projects api-keys`); they are still placeholders
+- [ ] Authentication -> Providers -> Email -> **Confirm email = OFF**
+- [ ] `node --env-file=.env.local tests/rls_smoke.mjs`
+- [ ] `npm run dev` and walk the flow: sign up -> submit job -> queued/processing/done|failed
+      live -> Retry a failed job. Highest-risk: the realtime subscription (publication + RLS
+      over the socket) and the storage path policies.
+
+Delivery decisions still owned by the user:
+- [ ] GitHub repo: public, or private + the reviewer's username (the brief leaves it as the
+      placeholder `<use username>`). `gh` is authed as ozoneRatchapon; no remote configured.
+- [ ] Optional Vercel deploy with the same two env vars.
