@@ -48,7 +48,8 @@ deployed at https://klylo-video-queue.vercel.app.
       the browser, live status, out-of-band realtime update, Retry, the dashboard error
       banner, timestamp hydration, the signed result URL, sign-out, sign-back-in, newest-first ordering and
       realtime in a cold-loaded tab.
-      Also 30/30 against the deployment (`BASE_URL=https://klylo-video-queue.vercel.app`).
+      Also 30/30 against the deployment (`BASE_URL=https://klylo-video-queue.vercel.app`),
+      re-run on `c278c10` so the two realtime-JWT checks are confirmed live, not assumed.
 - [x] Fixed a hydration mismatch (React #418) the UI suite surfaced in production only:
       `toLocaleString()` during render disagreed between Vercel's UTC and the viewer's
       timezone. Now `components/local_time.tsx` via `useSyncExternalStore`. Verified against

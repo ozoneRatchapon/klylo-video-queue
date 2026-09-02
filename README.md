@@ -59,17 +59,45 @@ is dynamic and nothing is rendered against a real project at build time.
 Import the repo on Vercel and set the same two env vars. The worker route declares
 `maxDuration = 60` so its 5–15 s sleep is not cut off.
 
+## Security
+
+The three hard requirements, and where each is enforced. Every rule lives in Postgres, so
+removing the UI or replaying its requests by hand gains nothing — client-side checks are UX,
+the policies are the enforcement.
+
+| Requirement | Enforced by | Proof |
+| --- | --- | --- |
+| RLS on `jobs`, own rows only | Four policies granted to `authenticated`, all on `auth.uid() = user_id` | `test:rls` 1–4 |
+| Private bucket, signed URLs | `storage.buckets.public = false`; `storage.objects` policies on the `<user_id>/…` prefix | `test:rls` 5–7 |
+| No `service_role` on the client | The key does not exist in this project at all | `lib/supabase/env.ts` reads only the two `NEXT_PUBLIC_*` vars |
+
+- **`update` carries both `using` and `with check`.** `using` picks the rows you may target;
+  `with check` validates the row *after* the write. Without the second, you could take a job
+  you own and reassign its `user_id` to someone else.
+- **`user_id` defaults to `auth.uid()`,** so the client is never trusted to supply it — and
+  `with check` makes a forged value fail rather than land.
+- **Realtime re-evaluates RLS per subscriber,** which is why the socket must carry a JWT; an
+  anonymous one subscribes successfully and then receives nothing. See the realtime bullet
+  under Key decisions.
+- **The bucket enforces the 5 MB cap and the JPG/PNG allowlist,** not just `JobForm`, so a
+  hand-rolled upload hits the same limits.
+- **The worker route uses the caller's session** and 401s without one, so the one place a
+  privileged key is normally reached for does not have one.
+- **There is no `getPublicUrl` call anywhere in the repo** — every image is a fresh
+  10-minute signed URL.
+
 ## Tests
 
 `tests/rls_smoke.mjs` is a standalone RLS smoke test. It signs up two throwaway users with
-the **anon key only** (no `service_role` anywhere) and asserts six things:
+the **anon key only** (no `service_role` anywhere) and asserts seven things:
 
-1. user B's `select` on user A's job id returns nothing,
-2. an unfiltered `select * from jobs` is silently scoped to the caller,
-3. user B's `update` on user A's job affects 0 rows,
-4. user B cannot sign a URL for user A's storage object,
-5. user A *can* sign its own object,
-6. the bucket's public URL does not serve the object.
+1. user A reads back its own job,
+2. user B's `select` on user A's job id returns nothing,
+3. an unfiltered `select * from jobs` is silently scoped to the caller,
+4. user B's `update` on user A's job affects 0 rows,
+5. user B cannot sign a URL for user A's storage object,
+6. user A *can* sign its own object,
+7. the bucket's public URL does not serve the object.
 
 ```bash
 npm run test:rls
@@ -104,9 +132,12 @@ anything, then submits a valid job and asserts that the card appears `queued`, t
 status reaches `done`/`failed` with no reload. It flips the row to `failed` out of band so
 the websocket path and the `failed`-only Retry button are covered deterministically rather
 than waiting on the worker's 20 % branch, aborts the jobs REST call to raise the dashboard
-error banner and clears it with the banner's own Retry, and finally signs out, confirms
-`/dashboard` is unreachable, and signs back in to check the job persisted. Any uncaught page
-error fails the run.
+error banner and clears it with the banner's own Retry, checks the `done` card exposes an
+**Open signed result URL** link and captions the two images distinctly, and finally signs
+out, confirms `/dashboard` is unreachable, and signs back in to check the job persisted —
+then that the list is newest-first both after a realtime merge and after a reload, and that
+a cold-loaded tab joins realtime with a JWT and receives updates. Any uncaught page error
+fails the run.
 
 The browser context is pinned to `Asia/Tokyo` / `ja-JP` on purpose: a viewer whose timezone
 differs from the renderer's is the production case (Vercel renders in UTC), and it is the
@@ -123,6 +154,8 @@ All four require **Authentication -> Providers -> Email -> Confirm email = OFF**
 the throwaway test users never get a session. Every suite honours `BASE_URL`, so the worker
 and UI suites can be pointed at the deployment
 (`BASE_URL=https://klylo-video-queue.vercel.app npm run test:ui`); both pass there.
+
+A green run is `test:rls` 7/7, `test:realtime` 5/5, `test:worker` 7/7 and `test:ui` 30/30.
 
 ## Key decisions
 
@@ -183,6 +216,28 @@ and UI suites can be pointed at the deployment
 - **A browser-driven worker is not durable.** If the tab closes mid-run, the job stays
   `processing` forever. A real fix is a queue (`pg_cron` + a Supabase Edge Function, or
   Vercel Queues) plus a reaper that fails jobs whose `updated_at` is older than ~60 s.
+- **A job stranded in `queued` has no Retry button.** If the `POST /api/jobs/:id/process`
+  call never lands — offline, a 500, the tab closed between the insert and the fetch — the
+  row sits at `queued` and `JobCard` only offers Retry on `failed`. The route handler
+  already accepts `queued` as a submittable status, so the server side works; only the
+  affordance is missing. The same reaper that fixes the stuck-`processing` case should
+  re-dispatch these.
+- **The uploaded MIME type is client-asserted.** `JobForm` sends `contentType: file.type`
+  and the bucket's `allowed_mime_types` validates that *declared* header, not the bytes, so
+  arbitrary content can be stored under an `image/png` label. Low severity — objects are
+  served from the Storage origin with the stored content type, so nothing executes in the
+  app's origin — but it is storage abuse a magic-byte check (or an Edge Function that
+  re-encodes on upload) would close.
+- **No per-user quota or rate limit.** RLS scopes *whose* rows you touch, not *how many*: a
+  signed-in user can create unlimited jobs and 5 MB objects. A `count(*)` check in an
+  insert policy, or a trigger enforcing a ceiling, is the cheap version.
+- **CI runs lint and build only.** The four suites need a live Supabase project with
+  *Confirm email* off and create real users, so they are deliberately manual; a green check
+  on a PR therefore proves it compiles, not that it works. Pointing them at a dedicated
+  throwaway project from CI is the fix.
+- **No security headers.** `next.config.ts` sets no CSP, `X-Frame-Options`, or
+  `Referrer-Policy`. Nothing here renders user-supplied HTML, so this is hardening rather
+  than an open hole.
 - **The UI suite is one browser, one viewport, one path per feature.** It runs only
   headless Chromium at the default desktop size; there is no cross-browser or mobile run,
   and each behaviour is asserted once rather than as a matrix.
