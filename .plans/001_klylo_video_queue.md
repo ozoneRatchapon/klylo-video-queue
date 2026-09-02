@@ -82,6 +82,25 @@ deployed at https://klylo-video-queue.vercel.app.
       `permission denied`; the suite rejects a "could not find the function" error, so
       dropping the function cannot fake a pass. Regression: `test:rls` still 7/7 and
       `test:realtime` still 5/5 after the `set_updated_at` change.
+- [x] **Security headers** (`6b42042`). `proxy.ts` now mints a per-request nonce and sets a
+      CSP around it — `'strict-dynamic'`, no `'unsafe-inline'` for scripts, and the Supabase
+      origin allowed only where it is used (`connect-src` incl. `wss:`, `img-src`). It was
+      merged into the existing session-refresh proxy, not layered beside it, so cookie
+      refresh and the `/dashboard` / `/login` guards are untouched. `next.config.ts` carries
+      the per-request-invariant ones (HSTS, `nosniff`, `DENY`, `Referrer-Policy`,
+      `Permissions-Policy`, cross-domain-policies) and `poweredByHeader` is off.
+      - `test:ui` grew a `securitypolicyviolation` collector and now reports blocked
+        resources, which an uncaught-error check could never see. Proven non-vacuous:
+        narrowing `img-src` made it fail and name every blocked signed URL.
+      - Residual: `/_not-found` is statically rendered, so it gets no nonce and does not
+        hydrate. It is a static link back to the app.
+- [x] **Magic-byte upload check** (`398461f`). `lib/image_sniff.ts` matches the PNG/JPEG
+      signatures; `JobForm` uploads with the *sniffed* content type instead of `file.type`.
+      Defence in depth only — a direct anon-key upload skips it — and the README says so.
+      `test:ui` 32/32, including a text file renamed to `.png`; `test:worker` still 7/7.
+
+Still open, non-security polish: a signed-URL cache keyed by path, a per-user quota, and
+pagination on the job list.
 
 ## Remaining (owner-gated)
 
