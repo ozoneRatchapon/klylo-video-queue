@@ -27,7 +27,7 @@ function check(name, passed, detail = "") {
 
 async function make_user(label) {
   const client = createClient(url, anon_key);
-  const email = `rls-smoke-${label}-${crypto.randomUUID()}@example.com`;
+  const email = `rls-smoke-${label}-${crypto.randomUUID()}@klylo-smoke.dev`;
   const password = `pw-${crypto.randomUUID()}`;
 
   const { data, error } = await client.auth.signUp({ email, password });
