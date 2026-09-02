@@ -108,9 +108,23 @@ const browser = await chromium.launch({ headless: !headed });
 // A viewer whose timezone differs from the renderer's is the production case
 // (Vercel renders in UTC) and is what makes a `toLocaleString()` in render show
 // up as a hydration mismatch. Pin it so the regression cannot come back quietly.
-const page = await browser
-  .newContext({ timezoneId: "Asia/Tokyo", locale: "ja-JP" })
-  .then((context) => context.newPage());
+const context = await browser.newContext({ timezoneId: "Asia/Tokyo", locale: "ja-JP" });
+
+// A blocked resource is not an uncaught error, so the check below would never
+// see a Content-Security-Policy that is too strict. Report violations directly.
+const csp_violations = [];
+await context.exposeBinding("__report_csp_violation", (_source, detail) =>
+  csp_violations.push(detail),
+);
+await context.addInitScript(() => {
+  document.addEventListener("securitypolicyviolation", (event) => {
+    // Signed URLs carry a fresh token per mint; drop the query so repeats dedupe.
+    const blocked = (event.blockedURI || "inline").split("?")[0];
+    window.__report_csp_violation(`${event.violatedDirective} blocked ${blocked}`);
+  });
+});
+
+const page = await context.newPage();
 const console_errors = [];
 page.on("pageerror", (error) => console_errors.push(error.message));
 
@@ -370,6 +384,12 @@ try {
     "no uncaught errors in the page",
     console_errors.length === 0,
     console_errors.join(" | ") || "none",
+  );
+
+  check(
+    "no Content-Security-Policy violations",
+    csp_violations.length === 0,
+    [...new Set(csp_violations)].join(" | ") || "none",
   );
 
   // Cleanup: the row and its uploaded object, under the owner's own RLS.

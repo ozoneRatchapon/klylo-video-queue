@@ -91,6 +91,29 @@ the policies are the enforcement.
 - **There is no `getPublicUrl` call anywhere in the repo** — every image is a fresh
   10-minute signed URL.
 
+### Response headers
+
+`proxy.ts` mints a fresh nonce per request and sets a **Content-Security-Policy** built
+around it. Next reads the nonce back out of the request header and stamps it onto every
+script and style it emits, so `script-src` needs no `'unsafe-inline'`; `'strict-dynamic'`
+covers the chunks those scripts load. Only the Supabase origin is allowed, and only where
+it is actually used — `connect-src` for auth, PostgREST and the realtime socket (`wss:`),
+`img-src` for signed Storage URLs. `frame-ancestors 'none'`, `object-src 'none'` and
+`base-uri 'self'` close the usual clickjacking and base-tag holes. This works because every
+page awaits `supabase_server()` and is therefore dynamically rendered; a static page could
+not be given a nonce.
+
+The headers that do not vary per request are in `next.config.ts`:
+`Strict-Transport-Security` (2 years, `preload`), `X-Content-Type-Options: nosniff` — which
+matters here, since users upload files — `X-Frame-Options: DENY` for browsers that ignore
+`frame-ancestors`, `Referrer-Policy: strict-origin-when-cross-origin` so signed URLs are not
+leaked in a `Referer`, a `Permissions-Policy` denying camera/microphone/geolocation, and
+`X-Permitted-Cross-Domain-Policies: none`. `poweredByHeader` is off.
+
+`test:ui` asserts this directly: the browser reports every `securitypolicyviolation` back to
+the suite, and the run fails if any fire. Narrowing `img-src` to drop the Supabase origin
+takes it from 31/31 to 28/31, so the check is not vacuous.
+
 ## Tests
 
 `tests/rls_smoke.mjs` is a standalone RLS smoke test. It signs up two throwaway users with
@@ -152,7 +175,7 @@ error banner and clears it with the banner's own Retry, checks the `done` card e
 out, confirms `/dashboard` is unreachable, and signs back in to check the job persisted —
 then that the list is newest-first both after a realtime merge and after a reload, and that
 a cold-loaded tab joins realtime with a JWT and receives updates. Any uncaught page error
-fails the run.
+fails the run, as does any Content-Security-Policy violation the browser reports.
 
 The browser context is pinned to `Asia/Tokyo` / `ja-JP` on purpose: a viewer whose timezone
 differs from the renderer's is the production case (Vercel renders in UTC), and it is the
@@ -171,7 +194,7 @@ and UI suites can be pointed at the deployment
 (`BASE_URL=https://klylo-video-queue.vercel.app npm run test:ui`); both pass there.
 
 A green run is `test:rls` 7/7, `test:realtime` 5/5, `test:worker` 7/7, `test:reaper` 8/8
-and `test:ui` 30/30.
+and `test:ui` 31/31.
 
 ## Key decisions
 
@@ -260,9 +283,10 @@ and `test:ui` 30/30.
   *Confirm email* off and create real users, so they are deliberately manual; a green check
   on a PR therefore proves it compiles, not that it works. Pointing them at a dedicated
   throwaway project from CI is the fix.
-- **No security headers.** `next.config.ts` sets no CSP, `X-Frame-Options`, or
-  `Referrer-Policy`. Nothing here renders user-supplied HTML, so this is hardening rather
-  than an open hole.
+- **The 404 page is statically rendered, so it gets no CSP nonce.** Next can only stamp a
+  nonce during server rendering; `/_not-found` is built ahead of time, so its scripts are
+  blocked and the page does not hydrate. It is a static link back to the app, so nothing is
+  lost — but it is the one route where the CSP is stricter than the markup.
 - **The UI suite is one browser, one viewport, one path per feature.** It runs only
   headless Chromium at the default desktop size; there is no cross-browser or mobile run,
   and each behaviour is asserted once rather than as a matrix.
