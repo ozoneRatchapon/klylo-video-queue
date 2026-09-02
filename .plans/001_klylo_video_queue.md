@@ -59,6 +59,27 @@ deployed at https://klylo-video-queue.vercel.app.
 - [x] Public GitHub repo + Vercel deploy with the two `NEXT_PUBLIC_*` env vars (the Supabase
       Vercel integration is deliberately *not* used — it injects a `service_role` key)
 
+## Post-submission hardening (`develop`)
+
+`main` stays frozen at `5210328`, exactly what the reviewer sees. Hardening lands on
+`develop` only.
+
+- [x] **Stale-job reaper** (`supabase/migrations/20260902170000_stale_job_reaper.sql`,
+      commit `7781e4f`). A `queued` or `processing` row older than 90s is failed by
+      `reap_stale_jobs()`, run every minute by `pg_cron`, with a distinct message per
+      branch. It *fails* rather than resumes, because `failed` is the status `JobCard`
+      already offers Retry on — recovery reuses the existing path. The function is
+      `security definer` and `revoke`d from `anon`/`authenticated`, so one user cannot fail
+      another's in-flight job. SQL only; no UI change.
+      - `set_updated_at` now stamps `now()` only when the update leaves the column alone,
+        which is what makes backdating (and therefore testing) expressible.
+      - The `pg_cron` scheduling is wrapped in an exception handler so the migration still
+        applies where the extension is unavailable.
+      - Applied to the remote database; `cron.job` shows `reap-stale-jobs, * * * * *,
+        active: true` and `execute` is granted only to `postgres`/`service_role`.
+- [x] `npm run test:reaper` — 8/8 against the remote database, and 2/8 before the migration,
+      so the suite is not vacuous. Regression: `test:rls` still 7/7 after the trigger change.
+
 ## Remaining (owner-gated)
 
 - [ ] **Owner runs:** finish purging the take-home brief from GitHub. The `filter-branch`

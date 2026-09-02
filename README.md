@@ -170,7 +170,8 @@ the throwaway test users never get a session. Every suite honours `BASE_URL`, so
 and UI suites can be pointed at the deployment
 (`BASE_URL=https://klylo-video-queue.vercel.app npm run test:ui`); both pass there.
 
-A green run is `test:rls` 7/7, `test:realtime` 5/5, `test:worker` 7/7 and `test:ui` 30/30.
+A green run is `test:rls` 7/7, `test:realtime` 5/5, `test:worker` 7/7, `test:reaper` 8/8
+and `test:ui` 30/30.
 
 ## Key decisions
 
@@ -267,8 +268,9 @@ A green run is `test:rls` 7/7, `test:realtime` 5/5, `test:worker` 7/7 and `test:
   and each behaviour is asserted once rather than as a matrix.
 - **`SUBSCRIBED` can fire just before the replication filter is live**, so a row inserted in
   that same instant is not delivered over the socket. The dashboard's catch-up refetch
-  covers it in practice; a stricter fix would be to not trust `SUBSCRIBED` as the readiness
-  signal at all.
+  covers it in the app, but `test:realtime` has no such refetch and its `owner receives
+  INSERT` check does flake — roughly one run in three. A stricter fix would be to not trust
+  `SUBSCRIBED` as the readiness signal at all.
 - **Signed URLs are re-minted per card on every mount** — fine at this scale, but a shared
   cache keyed by path with expiry would cut requests.
 - **No pagination** on the job list, and no delete-job action (rows and objects accumulate).
