@@ -16,7 +16,8 @@
  *   - Retry is offered on `failed` only, and re-runs the worker,
  *   - timestamps hydrate cleanly and then localise to the viewer's timezone,
  *   - a failing refetch raises the dashboard error banner, whose Retry clears it,
- *   - sign-out drops the session, and signing back in restores the job list.
+ *   - sign-out drops the session, and signing back in restores the job list,
+ *   - a second job is listed above the first, on both the realtime and the reload path.
  *
  * Requires "Confirm email" to be OFF. Uses the anon key only.
  */
@@ -303,6 +304,32 @@ try {
   const persisted = page.getByText(prompt).first();
   await persisted.waitFor({ timeout: 15_000 });
   check("existing user can sign in and sees the persisted job", await persisted.isVisible());
+
+  // 15. A second job must land at the top: the dashboard is ordered newest-first, both
+  //     from the server query and from the client-side merge that realtime feeds.
+  const second_prompt = `ui smoke newer ${crypto.randomUUID()}`;
+  await page.locator("textarea").fill(second_prompt);
+  await page.locator('input[type="file"]').setInputFiles(valid_png);
+  await page.getByRole("button", { name: "Create job" }).click();
+
+  await page.locator("article").nth(1).waitFor({ timeout: 30_000 });
+  check("both jobs are listed", (await page.locator("article").count()) === 2);
+
+  const order = await page.locator("article").allInnerTexts();
+  check(
+    "newest job is listed first",
+    order[0].includes(second_prompt) && order[1].includes(prompt),
+    order[0].includes(second_prompt) ? "newer card is at index 0" : "wrong order",
+  );
+
+  // Ordering must survive a reload too — that path is the server query, not the merge.
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.locator("article").nth(1).waitFor({ timeout: 30_000 });
+  const reloaded = await page.locator("article").allInnerTexts();
+  check(
+    "newest-first order survives a reload",
+    reloaded[0].includes(second_prompt) && reloaded[1].includes(prompt),
+  );
 
   check(
     "no uncaught errors in the page",
