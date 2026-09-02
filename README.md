@@ -159,6 +159,15 @@ and UI suites can be pointed at the deployment
   image skeletons) cover everything after first paint; this covers the fetch before it.
 - **Realtime plus a catch-up refetch.** On `SUBSCRIBED` the dashboard refetches once, so
   changes that happened between the server render and the socket opening aren't missed.
+- **The realtime socket is authenticated before it joins.** Realtime enforces RLS on the
+  replication stream, and an *anonymous* join is accepted: the channel reports `SUBSCRIBED`,
+  paints "Realtime connected", and then delivers nothing at all. A tab that restored its
+  session from cookies — a plain reload, or a second tab — used to join that way and sit
+  frozen on its server-rendered snapshot until the user refreshed. `dashboard_view.tsx`
+  therefore resolves the session, calls `realtime.setAuth()` before subscribing, and keeps
+  the socket in step with token refreshes and sign-outs via `onAuthStateChange`. The UI
+  suite pins this down with two checks: the `phx_join` frame must carry a JWT, and a
+  cold-loaded tab must receive an update. Both fail against the previous code.
 - **`proxy.ts` (Next 16's renamed `middleware.ts`)** refreshes the session cookie and does a
   cheap redirect, but every page/route re-checks `auth.getUser()` — the proxy is not the
   security boundary; RLS is.

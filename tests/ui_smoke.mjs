@@ -331,6 +331,41 @@ try {
     reloaded[0].includes(second_prompt) && reloaded[1].includes(prompt),
   );
 
+  // 16. Regression: a tab that restored its session from cookies rather than signing in
+  //     on the page must still receive realtime. The socket has to carry the JWT before
+  //     it joins — an anonymous join is accepted, reports SUBSCRIBED, and then silently
+  //     delivers nothing, which left every cold-loaded tab frozen on its initial render.
+  const cold = await page.context().newPage();
+  const cold_frames = [];
+  cold.on("websocket", (ws) =>
+    ws.on("framesent", (frame) => {
+      const body = String(frame.payload ?? "");
+      if (body.includes("phx_join")) {
+        cold_frames.push(/"access_token":"ey/.test(body));
+      }
+    }),
+  );
+  await cold.goto(`${base_url}/dashboard`, { waitUntil: "domcontentloaded" });
+  await cold.getByText("Realtime connected").waitFor({ timeout: 20_000 });
+  await cold.locator("article").first().waitFor({ timeout: 20_000 });
+  check(
+    "cold-loaded tab joins realtime with a JWT",
+    cold_frames.length > 0 && cold_frames.every(Boolean),
+    `${cold_frames.filter(Boolean).length}/${cold_frames.length} joins authenticated`,
+  );
+
+  const probe = `cold reload ${crypto.randomUUID()}`;
+  await client.from("jobs").update({ prompt: probe }).eq("id", job.id);
+  let cold_saw_it = false;
+  for (let attempt = 0; attempt < 20 && !cold_saw_it; attempt += 1) {
+    cold_saw_it = (await cold.getByText(probe).count()) > 0;
+    if (!cold_saw_it) {
+      await cold.waitForTimeout(500);
+    }
+  }
+  check("cold-loaded tab receives realtime updates", cold_saw_it);
+  await cold.close();
+
   check(
     "no uncaught errors in the page",
     console_errors.length === 0,

@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
+import type {
+  AuthChangeEvent,
+  RealtimeChannel,
+  RealtimePostgresChangesPayload,
+  Session,
+} from "@supabase/supabase-js";
 import { supabase_browser } from "@/lib/supabase/browser";
 import { JobForm } from "@/components/job_form";
 import { JobCard } from "@/components/job_card";
@@ -53,48 +58,77 @@ export function DashboardView({
 
   useEffect(() => {
     const supabase = supabase_browser();
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
 
-    const channel = supabase
-      .channel(`jobs:${user_id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "jobs",
-          filter: `user_id=eq.${user_id}`,
-        },
-        (payload: RealtimePostgresChangesPayload<job>) => {
-          switch (payload.eventType) {
-            case "INSERT":
-            case "UPDATE":
-              upsert_job(payload.new as job);
+    // Realtime enforces RLS on the replication stream, so the socket must carry the
+    // user's JWT *before* it joins. An anonymous join is accepted and reports
+    // SUBSCRIBED, then silently delivers nothing — which is what a tab that restored
+    // its session from cookies used to do. Setting it explicitly closes that race.
+    // The listener then keeps the socket in step with refreshes and sign-outs.
+    const { data: auth_listener } = supabase.auth.onAuthStateChange(
+      (_event: AuthChangeEvent, session: Session | null) => {
+        void supabase.realtime.setAuth(session?.access_token);
+      },
+    );
+
+    void (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      await supabase.realtime.setAuth(session?.access_token);
+      if (cancelled) {
+        return;
+      }
+
+      channel = supabase
+        .channel(`jobs:${user_id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "jobs",
+            filter: `user_id=eq.${user_id}`,
+          },
+          (payload: RealtimePostgresChangesPayload<job>) => {
+            switch (payload.eventType) {
+              case "INSERT":
+              case "UPDATE":
+                upsert_job(payload.new as job);
+                break;
+              case "DELETE":
+                set_jobs((current) =>
+                  current.filter(
+                    (item) => item.id !== (payload.old as { id: string }).id,
+                  ),
+                );
+                break;
+            }
+          },
+        )
+        .subscribe((status: string) => {
+          switch (status) {
+            case "SUBSCRIBED":
+              set_realtime("live");
+              // Catch up on anything that changed before the socket was ready.
+              void refetch();
               break;
-            case "DELETE":
-              set_jobs((current) =>
-                current.filter((item) => item.id !== (payload.old as { id: string }).id),
-              );
+            case "CHANNEL_ERROR":
+            case "TIMED_OUT":
+            case "CLOSED":
+              set_realtime("error");
               break;
           }
-        },
-      )
-      .subscribe((status: string) => {
-        switch (status) {
-          case "SUBSCRIBED":
-            set_realtime("live");
-            // Catch up on anything that changed before the socket was ready.
-            void refetch();
-            break;
-          case "CHANNEL_ERROR":
-          case "TIMED_OUT":
-          case "CLOSED":
-            set_realtime("error");
-            break;
-        }
-      });
+        });
+    })();
 
     return () => {
-      void supabase.removeChannel(channel);
+      cancelled = true;
+      auth_listener.subscription.unsubscribe();
+      if (channel) {
+        void supabase.removeChannel(channel);
+      }
     };
   }, [user_id, upsert_job, refetch]);
 
@@ -129,7 +163,11 @@ export function DashboardView({
             className="flex items-center justify-between gap-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
           >
             <span>{error}</span>
-            <button type="button" onClick={() => void refetch()} className="underline">
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              className="underline"
+            >
               Retry
             </button>
           </div>
