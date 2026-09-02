@@ -45,3 +45,6 @@ next-env.d.ts
 
 # supabase cli
 supabase/.temp
+
+# employer take-home brief — keep local only
+klylo-dev-assignment.md
