@@ -79,8 +79,20 @@ receives nothing for that job — i.e. RLS is enforced on the websocket, not onl
 node --env-file=.env.local tests/realtime_smoke.mjs
 ```
 
-Both require **Authentication -> Providers -> Email -> Confirm email = OFF**, otherwise the
-throwaway test users never get a session.
+`tests/worker_smoke.mjs` drives the route handler over real HTTP against a running dev
+server, rebuilding the session cookie `@supabase/ssr` would have written. It asserts that an
+unauthenticated call is rejected (401), another user's job is invisible (404, via RLS), a
+queued job reaches `done` or `failed` after a 5-15 s sleep with a consistent row, a
+`processing` job cannot be retried (409), and two concurrent calls claim the job exactly
+once (200 / 409).
+
+```bash
+npm run dev                                        # in another shell
+node --env-file=.env.local tests/worker_smoke.mjs
+```
+
+All three require **Authentication -> Providers -> Email -> Confirm email = OFF**, otherwise
+the throwaway test users never get a session.
 
 ## Key decisions
 
@@ -106,9 +118,9 @@ throwaway test users never get a session.
 - **A browser-driven worker is not durable.** If the tab closes mid-run, the job stays
   `processing` forever. A real fix is a queue (`pg_cron` + a Supabase Edge Function, or
   Vercel Queues) plus a reaper that fails jobs whose `updated_at` is older than ~60 s.
-- **RLS and realtime are covered by tests; the worker is not.** A test for the route
-  handler's state machine (retry rejected while `processing`, concurrent calls claiming the
-  job once) is still missing, as is any UI test.
+- **Nothing exercises the React components.** RLS, realtime and the worker route are covered
+  by the tests above, but the auth form, the job form and the dashboard have no coverage --
+  a Playwright walk of sign-up -> submit -> live status -> retry is the obvious next test.
 - **`SUBSCRIBED` can fire just before the replication filter is live**, so a row inserted in
   that same instant is not delivered over the socket. The dashboard's catch-up refetch
   covers it in practice; a stricter fix would be to not trust `SUBSCRIBED` as the readiness
