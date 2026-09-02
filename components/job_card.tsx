@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { run_worker } from "@/lib/jobs";
 import { SignedImage } from "@/components/signed_image";
+import { useSignedUrl } from "@/lib/use_signed_url";
 import { LocalTime } from "@/components/local_time";
 import type { job, job_status } from "@/lib/types";
 
@@ -22,6 +23,10 @@ export function JobCard({
 }) {
   const [retrying, set_retrying] = useState(false);
   const [error, set_error] = useState<string | null>(null);
+
+  // `result_url` holds the Storage object path; the bucket is private, so the actual
+  // URL only exists once signed. Surfaced as a link so the result is inspectable.
+  const result = useSignedUrl(item.status === "done" ? item.result_url : null);
 
   // Only a failed job can be resubmitted — queued/processing/done are not retryable.
   const can_retry = item.status === "failed" && !retrying;
@@ -44,11 +49,14 @@ export function JobCard({
 
   return (
     <article className="flex gap-4 rounded border border-zinc-200 p-4 dark:border-zinc-800">
-      <SignedImage
-        path={item.image_path}
-        alt="Reference image"
-        className="h-24 w-24 shrink-0 rounded object-cover"
-      />
+      <div className="flex shrink-0 flex-col gap-1">
+        <span className="text-xs font-medium text-zinc-500">Reference</span>
+        <SignedImage
+          path={item.image_path}
+          alt="Reference image"
+          className="h-24 w-24 rounded object-cover"
+        />
+      </div>
 
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         <div className="flex items-start justify-between gap-3">
@@ -76,6 +84,16 @@ export function JobCard({
               alt="Job result"
               className="h-40 w-auto rounded object-contain"
             />
+            {result.url && (
+              <a
+                href={result.url}
+                target="_blank"
+                rel="noreferrer"
+                className="self-start text-xs text-zinc-500 underline"
+              >
+                Open signed result URL
+              </a>
+            )}
           </div>
         )}
 

@@ -128,10 +128,9 @@ try {
   check("sign up lands on the dashboard", new URL(page.url()).pathname === "/dashboard", email);
 
   // 3. The dashboard shows the session and the empty state.
-  check(
-    "dashboard shows the signed-in email",
-    await page.getByText(email, { exact: true }).isVisible(),
-  );
+  const email_label = page.getByText(email, { exact: true });
+  await email_label.waitFor({ timeout: 15_000 });
+  check("dashboard shows the signed-in email", await email_label.isVisible());
   await page.getByText("No jobs yet. Submit one above.").waitFor({ timeout: 10_000 });
   check("empty state is shown for a new user", true);
 
@@ -206,9 +205,26 @@ try {
       "result image loads through a signed URL",
       await image_loaded(page.locator('article img[alt="Job result"]')),
     );
+    // The brief asks for a URL, and the private bucket means one only exists once
+    // signed — so the card exposes the signed URL itself, not just the rendered image.
+    const result_link = page.getByRole("link", { name: "Open signed result URL" }).first();
+    await result_link.waitFor({ timeout: 15_000 });
+    const href = await result_link.getAttribute("href");
+    check(
+      "result is reachable as a signed URL",
+      typeof href === "string" && href.includes("/job-images/") && href.includes("token="),
+      href ? `${href.split("?")[0]} …?token=…` : "no href",
+    );
   } else {
     check("result image loads through a signed URL", true, "skipped — job failed this run");
+    check("result is reachable as a signed URL", true, "skipped — job failed this run");
   }
+
+  // The reference thumbnail is captioned so it cannot be mistaken for the result.
+  check(
+    "reference and result are labelled distinctly",
+    (await page.locator("article").first().getByText("Reference", { exact: true }).count()) === 1,
+  );
 
   // 9. Force a failure out of band. The page must learn about it over the
   //    websocket, which also makes the Retry path deterministic.
@@ -284,10 +300,9 @@ try {
   await page.locator('input[type="password"]').fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.waitForURL("**/dashboard", { timeout: 30_000 });
-  check(
-    "existing user can sign in and sees the persisted job",
-    await page.getByText(prompt).first().isVisible(),
-  );
+  const persisted = page.getByText(prompt).first();
+  await persisted.waitFor({ timeout: 15_000 });
+  check("existing user can sign in and sees the persisted job", await persisted.isVisible());
 
   check(
     "no uncaught errors in the page",

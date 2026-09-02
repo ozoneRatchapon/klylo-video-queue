@@ -133,9 +133,20 @@ and UI suites can be pointed at the deployment
   It claims the job with a conditional update (`.in("status", ["queued", "failed"])`) so two
   concurrent requests can't both start it, and it refuses jobs that are already `processing`
   — that is what makes Retry safe on the server, not just a disabled button.
-- **`result_url` stores the Storage object path, not a URL.** The bucket is private, so any
-  URL persisted in the DB would be a signed URL that expires. The UI mints a fresh 10-minute
-  signed URL when it renders (`components/signed_image.tsx`).
+- **`result_url` stores the Storage object path, not a URL.** The brief asks for "the URL of
+  the uploaded image" *and* for a private bucket, and those two pull against each other: the
+  only URL that can reach a private object is a signed one, and it expires. Persisting it
+  would leave the column pointing at a dead link within the hour. So the column holds the
+  stable object path and the UI mints a fresh 10-minute signed URL on render
+  (`lib/use_signed_url.ts`). To keep the requirement visible rather than implied, a `done`
+  card renders both the result image and an **Open signed result URL** link to that URL, so
+  you can click through to the object itself.
+- **The reference and result images are captioned.** They are deliberately the same picture —
+  the brief defines the simulated result as the uploaded image — so without the "Reference"
+  and "Result" labels a card looks like it just drew the same thing twice.
+- **`app/dashboard/loading.tsx`** is the Suspense fallback for the dynamic dashboard. The
+  in-page loading affordances (`Submitting…`, `Connecting…`, the `processing` progress bar,
+  image skeletons) cover everything after first paint; this covers the fetch before it.
 - **Realtime plus a catch-up refetch.** On `SUBSCRIBED` the dashboard refetches once, so
   changes that happened between the server render and the socket opening aren't missed.
 - **`proxy.ts` (Next 16's renamed `middleware.ts`)** refreshes the session cookie and does a

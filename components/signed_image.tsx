@@ -1,10 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { supabase_browser } from "@/lib/supabase/browser";
-import { JOB_IMAGES_BUCKET } from "@/lib/types";
-
-const SIGNED_URL_TTL_SECONDS = 60 * 10;
+import { useSignedUrl } from "@/lib/use_signed_url";
 
 /** Renders a private Storage object through a short-lived signed URL. */
 export function SignedImage({
@@ -16,36 +12,7 @@ export function SignedImage({
   alt: string;
   className?: string;
 }) {
-  // Keyed by path so a path change falls back to the skeleton without a reset effect.
-  const [signed, set_signed] = useState<{ path: string; url: string } | null>(null);
-  const [failure, set_failure] = useState<{ path: string; message: string } | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    void (async () => {
-      const supabase = supabase_browser();
-      const { data, error: sign_error } = await supabase.storage
-        .from(JOB_IMAGES_BUCKET)
-        .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
-
-      if (cancelled) {
-        return;
-      }
-      if (sign_error || !data) {
-        set_failure({ path, message: sign_error?.message ?? "Could not sign image URL." });
-        return;
-      }
-      set_signed({ path, url: data.signedUrl });
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [path]);
-
-  const url = signed?.path === path ? signed.url : null;
-  const error = failure?.path === path ? failure.message : null;
+  const { url, error } = useSignedUrl(path);
 
   if (error) {
     return <span className="text-xs text-red-600 dark:text-red-400">{error}</span>;
