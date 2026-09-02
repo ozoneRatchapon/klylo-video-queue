@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { run_worker } from "@/lib/jobs";
 import { SignedImage } from "@/components/signed_image";
+import { LocalTime } from "@/components/local_time";
 import type { job, job_status } from "@/lib/types";
 
 const STATUS_STYLES: Record<job_status, string> = {
@@ -59,9 +60,7 @@ export function JobCard({
           </span>
         </div>
 
-        <p className="text-xs text-zinc-500">
-          {new Date(item.created_at).toLocaleString()}
-        </p>
+        <LocalTime iso={item.created_at} className="block text-xs text-zinc-500" />
 
         {item.status === "processing" && (
           <div className="h-1 w-full overflow-hidden rounded bg-zinc-200 dark:bg-zinc-800">
