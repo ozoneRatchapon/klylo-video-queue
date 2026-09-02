@@ -3,6 +3,9 @@
 A small Next.js 16 (App Router) + Supabase app: sign in, submit a simulated video job
 (prompt + reference image), and watch the status change live via Supabase Realtime.
 
+**Live demo:** https://klylo-video-queue.vercel.app — sign up with any email and password
+(email confirmation is off), then submit a job.
+
 - **Auth** — Supabase email/password; `/dashboard` is only reachable when signed in.
 - **Jobs** — prompt + one JPG/PNG (≤ 5 MB) uploaded to a **private** Storage bucket.
 - **Worker** — Route Handler that flips the job to `processing`, sleeps 5–15 s, then
