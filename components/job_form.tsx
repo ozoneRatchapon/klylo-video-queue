@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { supabase_browser } from "@/lib/supabase/browser";
 import { run_worker } from "@/lib/jobs";
+import { sniff_image_type } from "@/lib/image_sniff";
 import {
   ALLOWED_IMAGE_TYPES,
   JOB_IMAGES_BUCKET,
@@ -52,16 +53,24 @@ export function JobForm({
       return;
     }
 
+    // `file.type` comes from the extension, so confirm the bytes agree before
+    // we label the stored object with it.
+    const sniffed_type = await sniff_image_type(file);
+    if (!sniffed_type) {
+      set_error("That file is not a real JPG or PNG.");
+      return;
+    }
+
     set_pending(true);
     const supabase = supabase_browser();
 
     // Storage policies require the first path segment to be the owner's uid.
-    const extension = file.type === "image/png" ? "png" : "jpg";
+    const extension = sniffed_type === "image/png" ? "png" : "jpg";
     const image_path = `${user_id}/${crypto.randomUUID()}.${extension}`;
 
     const { error: upload_error } = await supabase.storage
       .from(JOB_IMAGES_BUCKET)
-      .upload(image_path, file, { contentType: file.type, upsert: false });
+      .upload(image_path, file, { contentType: sniffed_type, upsert: false });
 
     if (upload_error) {
       set_error(`Upload failed: ${upload_error.message}`);

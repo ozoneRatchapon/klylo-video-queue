@@ -111,8 +111,9 @@ leaked in a `Referer`, a `Permissions-Policy` denying camera/microphone/geolocat
 `X-Permitted-Cross-Domain-Policies: none`. `poweredByHeader` is off.
 
 `test:ui` asserts this directly: the browser reports every `securitypolicyviolation` back to
-the suite, and the run fails if any fire. Narrowing `img-src` to drop the Supabase origin
-takes it from 31/31 to 28/31, so the check is not vacuous.
+the suite, and the run fails if any fire. That check is not vacuous — narrowing `img-src` to
+drop the Supabase origin was measured failing it, with every blocked signed URL named in the
+output.
 
 ## Tests
 
@@ -164,8 +165,8 @@ npm run test:reaper
 
 `tests/ui_smoke.mjs` drives the actual React components in headless Chromium (Playwright,
 no test runner — the same plain-node style as the others). It signs up through `AuthForm`,
-checks that `JobForm` rejects a blank prompt, a non-image and a >5 MB file without creating
-anything, then submits a valid job and asserts that the card appears `queued`, that
+checks that `JobForm` rejects a blank prompt, a non-image, a >5 MB file and a text file
+renamed to `.png` without creating anything, then submits a valid job and asserts that the card appears `queued`, that
 `SignedImage` resolves the private object to a URL the browser really decodes, and that the
 status reaches `done`/`failed` with no reload. It flips the row to `failed` out of band so
 the websocket path and the `failed`-only Retry button are covered deterministically rather
@@ -194,7 +195,7 @@ and UI suites can be pointed at the deployment
 (`BASE_URL=https://klylo-video-queue.vercel.app npm run test:ui`); both pass there.
 
 A green run is `test:rls` 7/7, `test:realtime` 5/5, `test:worker` 7/7, `test:reaper` 8/8
-and `test:ui` 31/31.
+and `test:ui` 32/32.
 
 ## Key decisions
 
@@ -270,12 +271,16 @@ and `test:ui` 31/31.
   not a transparent re-dispatch, and detection takes up to ~2.5 min (90 s of staleness plus
   the one-minute cron tick). A real queue — Vercel Queues, or `pg_cron` driving a Supabase
   Edge Function — would own the run and resume it instead.
-- **The uploaded MIME type is client-asserted.** `JobForm` sends `contentType: file.type`
-  and the bucket's `allowed_mime_types` validates that *declared* header, not the bytes, so
-  arbitrary content can be stored under an `image/png` label. Low severity — objects are
-  served from the Storage origin with the stored content type, so nothing executes in the
-  app's origin — but it is storage abuse a magic-byte check (or an Edge Function that
-  re-encodes on upload) would close.
+- **The MIME check is still client-side, even though it now reads the bytes.**
+  `lib/image_sniff.ts` matches the PNG and JPEG signatures and `JobForm` labels the stored
+  object with the *sniffed* type rather than `file.type`, so the declared extension no
+  longer decides what gets written. But the upload goes straight from the browser to
+  Storage, so anyone driving the anon key by hand skips the check entirely and the bucket's
+  `allowed_mime_types` still only validates the declared header. Closing it properly means
+  moving the upload behind a route handler, or an Edge Function that re-encodes. Low
+  severity: the bucket is private, objects are only handed out as signed URLs, and the CSP
+  allows the Supabase origin for `img-src` but not `script-src`, so a mislabelled file
+  cannot execute in the app's origin.
 - **No per-user quota or rate limit.** RLS scopes *whose* rows you touch, not *how many*: a
   signed-in user can create unlimited jobs and 5 MB objects. A `count(*)` check in an
   insert policy, or a trigger enforcing a ceiling, is the cheap version.

@@ -10,7 +10,8 @@
  *   - the realtime channel reports "connected",
  *   - JobForm uploads an image and creates a job that renders as a card,
  *   - SignedImage resolves the private object to a URL the browser can load,
- *   - JobForm rejects an empty prompt, a non-image, and an oversized file,
+ *   - JobForm rejects an empty prompt, a non-image, an oversized file and a file whose
+ *     bytes do not match its extension,
  *   - the card walks queued -> processing -> done|failed with no reload,
  *   - an out-of-band UPDATE arrives over the websocket (deterministic failure),
  *   - Retry is offered on `failed` only, and re-runs the worker,
@@ -181,6 +182,28 @@ try {
   check(
     "oversized file is rejected",
     (await form_error(page)) === "Image must be 5 MB or smaller.",
+    (await form_error(page)) ?? "no error shown",
+  );
+
+  // A text file renamed to .png: the browser reports image/png, the bytes disagree.
+  // The prompt has to be valid here, or the earlier check short-circuits first.
+  await page.locator("textarea").fill("a prompt good enough to reach the file check");
+  await file_input.setInputFiles({
+    name: "liar.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("not an image, whatever the extension says"),
+  });
+  await page.getByRole("button", { name: "Create job" }).click();
+  // This one check is asynchronous — it reads the file's leading bytes — so the
+  // banner lands a tick after the click, unlike the synchronous validations above.
+  await page
+    .locator('form [role="alert"]')
+    .first()
+    .waitFor({ timeout: 5_000 })
+    .catch(() => {});
+  check(
+    "a file that lies about its type is rejected",
+    (await form_error(page)) === "That file is not a real JPG or PNG.",
     (await form_error(page)) ?? "no error shown",
   );
 
