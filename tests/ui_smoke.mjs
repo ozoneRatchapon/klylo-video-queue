@@ -10,10 +10,13 @@
  *   - the realtime channel reports "connected",
  *   - JobForm uploads an image and creates a job that renders as a card,
  *   - SignedImage resolves the private object to a URL the browser can load,
+ *   - JobForm rejects an empty prompt, a non-image, and an oversized file,
  *   - the card walks queued -> processing -> done|failed with no reload,
  *   - an out-of-band UPDATE arrives over the websocket (deterministic failure),
  *   - Retry is offered on `failed` only, and re-runs the worker,
- *   - sign-out drops the session and /dashboard becomes unreachable.
+ *   - timestamps hydrate cleanly and then localise to the viewer's timezone,
+ *   - a failing refetch raises the dashboard error banner, whose Retry clears it,
+ *   - sign-out drops the session, and signing back in restores the job list.
  *
  * Requires "Confirm email" to be OFF. Uses the anon key only.
  */
@@ -77,6 +80,18 @@ async function image_loaded(locator) {
   return false;
 }
 
+/** The inline validation message JobForm is currently showing, if any. */
+async function form_error(page) {
+  const alert = page.locator('form [role="alert"]');
+  return (await alert.count()) === 0 ? null : (await alert.first().innerText()).trim();
+}
+
+const valid_png = {
+  name: "reference.png",
+  mimeType: "image/png",
+  buffer: Buffer.from(png_base64, "base64"),
+};
+
 // Fail fast with a clear message if the dev server is not up.
 try {
   await fetch(base_url, { method: "HEAD" });
@@ -89,7 +104,12 @@ const email = `ui-smoke-${crypto.randomUUID()}@klylo-smoke.dev`;
 const password = `pw-${crypto.randomUUID()}`;
 
 const browser = await chromium.launch({ headless: !headed });
-const page = await browser.newContext().then((context) => context.newPage());
+// A viewer whose timezone differs from the renderer's is the production case
+// (Vercel renders in UTC) and is what makes a `toLocaleString()` in render show
+// up as a hydration mismatch. Pin it so the regression cannot come back quietly.
+const page = await browser
+  .newContext({ timezoneId: "Asia/Tokyo", locale: "ja-JP" })
+  .then((context) => context.newPage());
 const console_errors = [];
 page.on("pageerror", (error) => console_errors.push(error.message));
 
@@ -119,14 +139,43 @@ try {
   await page.getByText("Realtime connected").waitFor({ timeout: 20_000 });
   check("realtime channel reports connected", true);
 
-  // 5. Submit a job through JobForm.
+  // 5. JobForm rejects bad input before anything reaches Storage.
+  const file_input = page.locator('input[type="file"]');
+
+  // A blank prompt passes the browser's `required` check but not ours.
+  await page.locator("textarea").fill("   ");
+  await file_input.setInputFiles(valid_png);
+  await page.getByRole("button", { name: "Create job" }).click();
+  check("blank prompt is rejected", (await form_error(page)) === "Prompt is required.");
+
+  await file_input.setInputFiles({
+    name: "notes.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("not an image"),
+  });
+  check(
+    "non-image file is rejected",
+    (await form_error(page)) === "Only JPG or PNG images are allowed.",
+    (await form_error(page)) ?? "no error shown",
+  );
+
+  await file_input.setInputFiles({
+    name: "huge.png",
+    mimeType: "image/png",
+    buffer: Buffer.alloc(5 * 1024 * 1024 + 1),
+  });
+  check(
+    "oversized file is rejected",
+    (await form_error(page)) === "Image must be 5 MB or smaller.",
+    (await form_error(page)) ?? "no error shown",
+  );
+
+  check("no card was created by the rejected submissions", (await page.locator("article").count()) === 0);
+
+  // 6. Submit a valid job through JobForm.
   const prompt = `ui smoke ${crypto.randomUUID()}`;
   await page.locator("textarea").fill(prompt);
-  await page.locator('input[type="file"]').setInputFiles({
-    name: "reference.png",
-    mimeType: "image/png",
-    buffer: Buffer.from(png_base64, "base64"),
-  });
+  await file_input.setInputFiles(valid_png);
   await page.getByRole("button", { name: "Create job" }).click();
 
   await page.locator("article").first().waitFor({ timeout: 30_000 });
@@ -138,13 +187,13 @@ try {
   );
   check("card shows the submitted prompt", await page.getByText(prompt).first().isVisible());
 
-  // 6. SignedImage turned the private object into a URL the browser could fetch.
+  // 7. SignedImage turned the private object into a URL the browser could fetch.
   check(
     "reference image loads through a signed URL",
     await image_loaded(page.locator('article img[alt="Reference image"]')),
   );
 
-  // 7. The worker drives the card to a terminal status without a reload.
+  // 8. The worker drives the card to a terminal status without a reload.
   const terminal = await wait_for_terminal(page);
   check(
     "card reaches a terminal status live",
@@ -161,7 +210,7 @@ try {
     check("result image loads through a signed URL", true, "skipped — job failed this run");
   }
 
-  // 8. Force a failure out of band. The page must learn about it over the
+  // 9. Force a failure out of band. The page must learn about it over the
   //    websocket, which also makes the Retry path deterministic.
   const client = createClient(url, anon_key);
   const { data: signed_in, error: sign_in_error } = await client.auth.signInWithPassword({
@@ -185,7 +234,7 @@ try {
   const retry = page.getByRole("button", { name: "Retry" });
   check("retry is offered on a failed job", await retry.isEnabled());
 
-  // 9. Retry re-runs the worker and the card settles again.
+  // 10. Retry re-runs the worker and the card settles again.
   await retry.click();
   // Guard against reading the pre-click "failed" badge back as the new result.
   await page.waitForFunction(
@@ -200,12 +249,45 @@ try {
     `status=${retried.status} after ${(retried.elapsed_ms / 1000).toFixed(1)}s`,
   );
 
-  // 10. Sign out drops the session and the dashboard becomes unreachable.
+  // 11. A failing refetch must surface the dashboard error banner, and its own
+  //     Retry must clear it once the request succeeds again.
+  await page.route("**/rest/v1/jobs*", (route) => route.abort("failed"));
+  const banner = page.locator('section > div[role="alert"]');
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await banner.waitFor({ timeout: 20_000 });
+  check("a failing refetch raises the error banner", await banner.isVisible());
+
+  await page.unroute("**/rest/v1/jobs*");
+  await banner.getByRole("button", { name: "Retry" }).click();
+  await banner.waitFor({ state: "hidden", timeout: 20_000 });
+  check("the banner's Retry clears the error", (await banner.count()) === 0);
+
+  // 12. The reload above re-rendered an existing card on the server, which is
+  //     when a timestamp formatted during render would mismatch on hydration.
+  const stamp = page.locator("article time").first();
+  const stamp_text = (await stamp.innerText()).trim();
+  check(
+    "timestamp localises to the viewer's timezone",
+    !stamp_text.endsWith("UTC") && stamp_text.length > 0,
+    stamp_text,
+  );
+
+  // 13. Sign out drops the session and the dashboard becomes unreachable.
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.waitForURL("**/login", { timeout: 20_000 });
   await page.goto(`${base_url}/dashboard`, { waitUntil: "domcontentloaded" });
   await page.waitForURL("**/login", { timeout: 15_000 });
   check("signed-out /dashboard redirects to /login", new URL(page.url()).pathname === "/login");
+
+  // 14. Signing back in as an existing user restores the job list.
+  await page.locator('input[type="email"]').fill(email);
+  await page.locator('input[type="password"]').fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForURL("**/dashboard", { timeout: 30_000 });
+  check(
+    "existing user can sign in and sees the persisted job",
+    await page.getByText(prompt).first().isVisible(),
+  );
 
   check(
     "no uncaught errors in the page",
