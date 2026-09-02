@@ -15,7 +15,7 @@ A small Next.js 16 (App Router) + Supabase app: sign in, submit a simulated vide
 ### 1. Supabase project
 
 Create a project at [supabase.com](https://supabase.com), then open **SQL Editor** and run
-[`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql) once. It is
+[`supabase/migrations/20260902120000_init.sql`](supabase/migrations/20260902120000_init.sql) once. It is
 idempotent and creates everything the app needs:
 
 - `job_status` enum and the `jobs` table (+ `updated_at` trigger, index on `(user_id, created_at desc)`)
@@ -54,6 +54,25 @@ npm run dev     # http://localhost:3000
 Import the repo on Vercel and set the same two env vars. The worker route declares
 `maxDuration = 60` so its 5–15 s sleep is not cut off.
 
+## Tests
+
+`tests/rls_smoke.mjs` is a standalone RLS smoke test. It signs up two throwaway users with
+the **anon key only** (no `service_role` anywhere) and asserts six things:
+
+1. user B's `select` on user A's job id returns nothing,
+2. an unfiltered `select * from jobs` is silently scoped to the caller,
+3. user B's `update` on user A's job affects 0 rows,
+4. user B cannot sign a URL for user A's storage object,
+5. user A *can* sign its own object,
+6. the bucket's public URL does not serve the object.
+
+```bash
+node --env-file=.env.local tests/rls_smoke.mjs
+```
+
+Requires **Authentication -> Providers -> Email -> Confirm email = OFF**, otherwise the two
+test users never get a session.
+
 ## Key decisions
 
 - **Upload + insert happen in the browser, under RLS.** The anon key plus the user's JWT
@@ -78,8 +97,9 @@ Import the repo on Vercel and set the same two env vars. The worker route declar
 - **A browser-driven worker is not durable.** If the tab closes mid-run, the job stays
   `processing` forever. A real fix is a queue (`pg_cron` + a Supabase Edge Function, or
   Vercel Queues) plus a reaper that fails jobs whose `updated_at` is older than ~60 s.
-- **No automated tests.** The valuable ones would be RLS tests (user A cannot read user B's
-  job or object) and a worker state-machine test.
+- **Only RLS is covered by tests.** `tests/rls_smoke.mjs` proves cross-user isolation; a
+  worker state-machine test (queued -> processing -> done/failed, retry rejected while
+  processing) is still missing, as is any UI test.
 - **Signed URLs are re-minted per card on every mount** — fine at this scale, but a shared
   cache keyed by path with expiry would cut requests.
 - **No pagination** on the job list, and no delete-job action (rows and objects accumulate).
