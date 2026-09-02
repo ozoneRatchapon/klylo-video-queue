@@ -141,6 +141,16 @@ and UI suites can be pointed at the deployment
   (`lib/use_signed_url.ts`). To keep the requirement visible rather than implied, a `done`
   card renders both the result image and an **Open signed result URL** link to that URL, so
   you can click through to the object itself.
+- **A signed URL is a bearer credential, and the UI says so.** Anyone holding the URL can
+  fetch that object without a session — that is what a signed URL *is*, not a gap in RLS.
+  RLS governs who may **mint** one (`job_images_select_own`: only the owner can sign their
+  own path); the token itself is then a capability with a 10-minute fuse, scoped to a single
+  object. The link is labelled with its expiry so that is visible rather than implied. Three
+  properties keep it defensible: short TTL, never persisted to the database, and never
+  logged in full (the UI suite truncates it to `…?token=…`). Removing bearer exposure
+  entirely would mean proxying bytes through a session-checked route handler, which the
+  brief rules out by asking for signed URLs — and would put every image byte through
+  serverless bandwidth.
 - **The reference and result images are captioned.** They are deliberately the same picture —
   the brief defines the simulated result as the uploaded image — so without the "Reference"
   and "Result" labels a card looks like it just drew the same thing twice.

@@ -4,7 +4,11 @@ import { useEffect, useState } from "react";
 import { supabase_browser } from "@/lib/supabase/browser";
 import { JOB_IMAGES_BUCKET } from "@/lib/types";
 
-const SIGNED_URL_TTL_SECONDS = 60 * 10;
+/**
+ * A signed URL is a bearer credential: whoever holds it can fetch the object without a
+ * session. Keep the fuse short, scope it to the one object, and never persist it.
+ */
+export const SIGNED_URL_TTL_SECONDS = 60 * 10;
 
 type signed_url = { url: string | null; error: string | null };
 

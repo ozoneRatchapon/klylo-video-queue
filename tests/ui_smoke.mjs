@@ -208,7 +208,7 @@ try {
     );
     // The brief asks for a URL, and the private bucket means one only exists once
     // signed — so the card exposes the signed URL itself, not just the rendered image.
-    const result_link = page.getByRole("link", { name: "Open signed result URL" }).first();
+    const result_link = page.getByRole("link", { name: /^Open signed result URL/ }).first();
     await result_link.waitFor({ timeout: 15_000 });
     const href = await result_link.getAttribute("href");
     check(

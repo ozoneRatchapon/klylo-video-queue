@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { run_worker } from "@/lib/jobs";
 import { SignedImage } from "@/components/signed_image";
-import { useSignedUrl } from "@/lib/use_signed_url";
+import { useSignedUrl, SIGNED_URL_TTL_SECONDS } from "@/lib/use_signed_url";
 import { LocalTime } from "@/components/local_time";
 import type { job, job_status } from "@/lib/types";
 
@@ -91,7 +91,7 @@ export function JobCard({
                 rel="noreferrer"
                 className="self-start text-xs text-zinc-500 underline"
               >
-                Open signed result URL
+                Open signed result URL (expires in {SIGNED_URL_TTL_SECONDS / 60} min)
               </a>
             )}
           </div>
