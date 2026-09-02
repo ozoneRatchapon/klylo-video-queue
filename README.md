@@ -70,8 +70,17 @@ the **anon key only** (no `service_role` anywhere) and asserts six things:
 node --env-file=.env.local tests/rls_smoke.mjs
 ```
 
-Requires **Authentication -> Providers -> Email -> Confirm email = OFF**, otherwise the two
-test users never get a session.
+`tests/realtime_smoke.mjs` subscribes exactly the way `components/dashboard_view.tsx` does
+and asserts that the owner receives the `INSERT` and both `UPDATE`s
+(`queued -> processing -> done`) live, while a second user subscribed to the same table
+receives nothing for that job — i.e. RLS is enforced on the websocket, not only on REST.
+
+```bash
+node --env-file=.env.local tests/realtime_smoke.mjs
+```
+
+Both require **Authentication -> Providers -> Email -> Confirm email = OFF**, otherwise the
+throwaway test users never get a session.
 
 ## Key decisions
 
@@ -97,9 +106,13 @@ test users never get a session.
 - **A browser-driven worker is not durable.** If the tab closes mid-run, the job stays
   `processing` forever. A real fix is a queue (`pg_cron` + a Supabase Edge Function, or
   Vercel Queues) plus a reaper that fails jobs whose `updated_at` is older than ~60 s.
-- **Only RLS is covered by tests.** `tests/rls_smoke.mjs` proves cross-user isolation; a
-  worker state-machine test (queued -> processing -> done/failed, retry rejected while
-  processing) is still missing, as is any UI test.
+- **RLS and realtime are covered by tests; the worker is not.** A test for the route
+  handler's state machine (retry rejected while `processing`, concurrent calls claiming the
+  job once) is still missing, as is any UI test.
+- **`SUBSCRIBED` can fire just before the replication filter is live**, so a row inserted in
+  that same instant is not delivered over the socket. The dashboard's catch-up refetch
+  covers it in practice; a stricter fix would be to not trust `SUBSCRIBED` as the readiness
+  signal at all.
 - **Signed URLs are re-minted per card on every mount** — fine at this scale, but a shared
   cache keyed by path with expiry would cut requests.
 - **No pagination** on the job list, and no delete-job action (rows and objects accumulate).
