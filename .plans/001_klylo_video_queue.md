@@ -78,7 +78,10 @@ deployed at https://klylo-video-queue.vercel.app.
       - Applied to the remote database; `cron.job` shows `reap-stale-jobs, * * * * *,
         active: true` and `execute` is granted only to `postgres`/`service_role`.
 - [x] `npm run test:reaper` — 8/8 against the remote database, and 2/8 before the migration,
-      so the suite is not vacuous. Regression: `test:rls` still 7/7 after the trigger change.
+      so the suite is not vacuous. A client calling `reap_stale_jobs()` must get
+      `permission denied`; the suite rejects a "could not find the function" error, so
+      dropping the function cannot fake a pass. Regression: `test:rls` still 7/7 and
+      `test:realtime` still 5/5 after the `set_updated_at` change.
 
 ## Remaining (owner-gated)
 
