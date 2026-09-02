@@ -28,25 +28,32 @@ status change live.
 - `result_url` stores the Storage object path; the UI mints short-lived signed URLs
   (bucket is private, so a stored URL would expire anyway).
 
-## Verification & delivery (owner-gated)
+## Verification & delivery
 
-Implementation is complete, committed, lint-clean and build-clean. The app has **never run
-against a live Supabase project** — everything below needs one, and creating it is gated on
-the repo owner (the CLI call to provision cloud infra is blocked in auto mode).
+Live Supabase project `klylo-video-queue` (ref `cqpobbtiqvtvrtegpnuv`, ap-southeast-1),
+deployed at https://klylo-video-queue.vercel.app.
 
-- [ ] **Owner runs:** `npx supabase projects create klylo-video-queue --org-id aljwybsnhpqpcuvzamss --db-password <in .env.local as SUPABASE_DB_PASSWORD> --region ap-southeast-1`
-- [ ] `supabase link --project-ref <ref>` then `supabase db push` (fallback: paste
-      `supabase/migrations/20260902120000_init.sql` into the dashboard SQL editor — that is
-      how the reviewer runs it anyway)
-- [ ] Fill real `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `.env.local`
-      (`supabase projects api-keys`); they are still placeholders
-- [ ] Authentication -> Providers -> Email -> **Confirm email = OFF**
-- [ ] `node --env-file=.env.local tests/rls_smoke.mjs`
-- [ ] `npm run dev` and walk the flow: sign up -> submit job -> queued/processing/done|failed
-      live -> Retry a failed job. Highest-risk: the realtime subscription (publication + RLS
-      over the socket) and the storage path policies.
+- [x] Project provisioned by the owner; `supabase link` + `supabase db push` applied
+      `supabase/migrations/20260902120000_init.sql` to the remote database
+- [x] Real `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `.env.local`
+      (gitignored, never committed; no `service_role` key anywhere)
+- [x] Authentication -> Providers -> Email -> **Confirm email = OFF**
+- [x] `npm run test:rls` — 7/7
+- [x] `npm run test:realtime` — 5/5
+- [x] `npm run test:worker` — 7/7 locally and against the deployment; both the `done` and
+      the `failed` branch observed
+- [x] `npm run test:ui` — 15/15 locally and against the deployment: sign-up, job submission
+      with a real upload, signed images decoding in the browser, live status, out-of-band
+      realtime update, Retry, sign-out
+- [x] Public GitHub repo + Vercel deploy with the two `NEXT_PUBLIC_*` env vars (the Supabase
+      Vercel integration is deliberately *not* used — it injects a `service_role` key)
 
-Delivery decisions still owned by the user:
-- [ ] GitHub repo: public, or private + the reviewer's username (the brief leaves it as the
-      placeholder `<use username>`). `gh` is authed as ozoneRatchapon; no remote configured.
-- [ ] Optional Vercel deploy with the same two env vars.
+## Remaining (owner-gated)
+
+- [ ] **Owner runs:** purge the take-home brief from git history. It is untracked and
+      gitignored at the tip but still visible in commit `f2e6f58`. A history rewrite is
+      blocked in auto mode, so:
+      `FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --index-filter 'git rm --cached --ignore-unmatch klylo-dev-assignment.md' --prune-empty -- --all`
+      then `git push --force origin main`. Force-push (not delete-and-recreate) keeps the
+      Vercel <-> GitHub link intact; Vercel redeploys automatically.
+- [ ] Turn *Confirm email* back ON once the reviewer is finished.

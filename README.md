@@ -70,7 +70,7 @@ the **anon key only** (no `service_role` anywhere) and asserts six things:
 6. the bucket's public URL does not serve the object.
 
 ```bash
-node --env-file=.env.local tests/rls_smoke.mjs
+npm run test:rls
 ```
 
 `tests/realtime_smoke.mjs` subscribes exactly the way `components/dashboard_view.tsx` does
@@ -79,7 +79,7 @@ and asserts that the owner receives the `INSERT` and both `UPDATE`s
 receives nothing for that job — i.e. RLS is enforced on the websocket, not only on REST.
 
 ```bash
-node --env-file=.env.local tests/realtime_smoke.mjs
+npm run test:realtime
 ```
 
 `tests/worker_smoke.mjs` drives the route handler over real HTTP against a running dev
@@ -90,12 +90,29 @@ queued job reaches `done` or `failed` after a 5-15 s sleep with a consistent row
 once (200 / 409).
 
 ```bash
-npm run dev                                        # in another shell
-node --env-file=.env.local tests/worker_smoke.mjs
+npm run dev            # in another shell
+npm run test:worker
 ```
 
-All three require **Authentication -> Providers -> Email -> Confirm email = OFF**, otherwise
-the throwaway test users never get a session.
+`tests/ui_smoke.mjs` drives the actual React components in headless Chromium (Playwright,
+no test runner — the same plain-node style as the others). It signs up through `AuthForm`,
+submits a job through `JobForm` with a real file upload, and asserts that the card appears
+`queued`, that `SignedImage` resolves the private object to a URL the browser really
+decodes, and that the status reaches `done`/`failed` with no reload. It then flips the row
+to `failed` out of band so the websocket path and the `failed`-only Retry button are covered
+deterministically rather than waiting on the worker's 20 % branch, clicks Retry, and finally
+checks that sign-out makes `/dashboard` unreachable. Any uncaught page error fails the run.
+
+```bash
+npx playwright install chromium   # once
+npm run dev                       # in another shell
+npm run test:ui                   # HEADED=1 to watch it
+```
+
+All four require **Authentication -> Providers -> Email -> Confirm email = OFF**, otherwise
+the throwaway test users never get a session. Every suite honours `BASE_URL`, so the worker
+and UI suites can be pointed at the deployment
+(`BASE_URL=https://klylo-video-queue.vercel.app npm run test:ui`); both pass there.
 
 ## Key decisions
 
@@ -121,9 +138,9 @@ the throwaway test users never get a session.
 - **A browser-driven worker is not durable.** If the tab closes mid-run, the job stays
   `processing` forever. A real fix is a queue (`pg_cron` + a Supabase Edge Function, or
   Vercel Queues) plus a reaper that fails jobs whose `updated_at` is older than ~60 s.
-- **Nothing exercises the React components.** RLS, realtime and the worker route are covered
-  by the tests above, but the auth form, the job form and the dashboard have no coverage --
-  a Playwright walk of sign-up -> submit -> live status -> retry is the obvious next test.
+- **The UI suite is one happy path, not a matrix.** It covers sign-up -> submit -> live
+  status -> retry -> sign-out, but not sign-in of an existing user, the client-side file
+  validation (wrong type / > 5 MB), or the error banner and its refetch button.
 - **`SUBSCRIBED` can fire just before the replication filter is live**, so a row inserted in
   that same instant is not delivered over the socket. The dashboard's catch-up refetch
   covers it in practice; a stricter fix would be to not trust `SUBSCRIBED` as the readiness

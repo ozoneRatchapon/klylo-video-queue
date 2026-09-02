@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:rls": "node --env-file=.env.local tests/rls_smoke.mjs",
+    "test:realtime": "node --env-file=.env.local tests/realtime_smoke.mjs",
+    "test:worker": "node --env-file=.env.local tests/worker_smoke.mjs",
+    "test:ui": "node --env-file=.env.local tests/ui_smoke.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",
@@ -23,6 +27,7 @@
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
+    "playwright": "^1.62.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
