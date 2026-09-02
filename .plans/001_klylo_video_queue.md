@@ -42,9 +42,14 @@ deployed at https://klylo-video-queue.vercel.app.
 - [x] `npm run test:realtime` — 5/5
 - [x] `npm run test:worker` — 7/7 locally and against the deployment; both the `done` and
       the `failed` branch observed
-- [x] `npm run test:ui` — 15/15 locally and against the deployment: sign-up, job submission
-      with a real upload, signed images decoding in the browser, live status, out-of-band
-      realtime update, Retry, sign-out
+- [x] `npm run test:ui` — 23/23 against a local production build and against the deployment:
+      sign-up, form validation, job submission with a real upload, signed images decoding in
+      the browser, live status, out-of-band realtime update, Retry, the dashboard error
+      banner, timestamp hydration, sign-out and sign-back-in
+- [x] Fixed a hydration mismatch (React #418) the UI suite surfaced in production only:
+      `toLocaleString()` during render disagreed between Vercel's UTC and the viewer's
+      timezone. Now `components/local_time.tsx` via `useSyncExternalStore`.
+- [x] CI: `.github/workflows/ci.yml` runs lint + build on push and pull request
 - [x] Public GitHub repo + Vercel deploy with the two `NEXT_PUBLIC_*` env vars (the Supabase
       Vercel integration is deliberately *not* used — it injects a `service_role` key)
 

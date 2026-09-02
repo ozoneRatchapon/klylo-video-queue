@@ -50,7 +50,9 @@ npm install
 npm run dev     # http://localhost:3000
 ```
 
-`npm run build` type-checks and builds; `npx eslint .` lints.
+`npm run build` type-checks and builds; `npm run lint` lints. Both run on every push and
+pull request via `.github/workflows/ci.yml` — the build needs no secrets, since every page
+is dynamic and nothing is rendered against a real project at build time.
 
 ### 4. Deploy (optional)
 
@@ -96,12 +98,20 @@ npm run test:worker
 
 `tests/ui_smoke.mjs` drives the actual React components in headless Chromium (Playwright,
 no test runner — the same plain-node style as the others). It signs up through `AuthForm`,
-submits a job through `JobForm` with a real file upload, and asserts that the card appears
-`queued`, that `SignedImage` resolves the private object to a URL the browser really
-decodes, and that the status reaches `done`/`failed` with no reload. It then flips the row
-to `failed` out of band so the websocket path and the `failed`-only Retry button are covered
-deterministically rather than waiting on the worker's 20 % branch, clicks Retry, and finally
-checks that sign-out makes `/dashboard` unreachable. Any uncaught page error fails the run.
+checks that `JobForm` rejects a blank prompt, a non-image and a >5 MB file without creating
+anything, then submits a valid job and asserts that the card appears `queued`, that
+`SignedImage` resolves the private object to a URL the browser really decodes, and that the
+status reaches `done`/`failed` with no reload. It flips the row to `failed` out of band so
+the websocket path and the `failed`-only Retry button are covered deterministically rather
+than waiting on the worker's 20 % branch, aborts the jobs REST call to raise the dashboard
+error banner and clears it with the banner's own Retry, and finally signs out, confirms
+`/dashboard` is unreachable, and signs back in to check the job persisted. Any uncaught page
+error fails the run.
+
+The browser context is pinned to `Asia/Tokyo` / `ja-JP` on purpose: a viewer whose timezone
+differs from the renderer's is the production case (Vercel renders in UTC), and it is the
+only condition under which a date formatted during render shows up as a hydration mismatch.
+That is a real bug this suite caught — see `components/local_time.tsx`.
 
 ```bash
 npx playwright install chromium   # once
@@ -131,6 +141,11 @@ and UI suites can be pointed at the deployment
 - **`proxy.ts` (Next 16's renamed `middleware.ts`)** refreshes the session cookie and does a
   cheap redirect, but every page/route re-checks `auth.getUser()` — the proxy is not the
   security boundary; RLS is.
+- **Timestamps render as UTC first, then localise** (`components/local_time.tsx`). Calling
+  `toLocaleString()` during render resolves against the *renderer's* timezone — UTC on
+  Vercel, the viewer's own in the browser — so the two passes disagree and React reports a
+  hydration mismatch (#418). `useSyncExternalStore` gives SSR and hydration one fixed UTC
+  string and swaps in the viewer's locale afterwards.
 - **snake_case** for functions/variables per the repo conventions; components stay PascalCase.
 
 ## Known gaps / next steps
@@ -138,9 +153,9 @@ and UI suites can be pointed at the deployment
 - **A browser-driven worker is not durable.** If the tab closes mid-run, the job stays
   `processing` forever. A real fix is a queue (`pg_cron` + a Supabase Edge Function, or
   Vercel Queues) plus a reaper that fails jobs whose `updated_at` is older than ~60 s.
-- **The UI suite is one happy path, not a matrix.** It covers sign-up -> submit -> live
-  status -> retry -> sign-out, but not sign-in of an existing user, the client-side file
-  validation (wrong type / > 5 MB), or the error banner and its refetch button.
+- **The UI suite is one browser, one viewport, one path per feature.** It runs only
+  headless Chromium at the default desktop size; there is no cross-browser or mobile run,
+  and each behaviour is asserted once rather than as a matrix.
 - **`SUBSCRIBED` can fire just before the replication filter is live**, so a row inserted in
   that same instant is not delivered over the socket. The dashboard's catch-up refetch
   covers it in practice; a stricter fix would be to not trust `SUBSCRIBED` as the readiness
