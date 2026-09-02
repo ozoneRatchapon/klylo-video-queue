@@ -47,11 +47,12 @@ deployed at https://klylo-video-queue.vercel.app.
       sign-up, form validation, job submission with a real upload, signed images decoding in
       the browser, live status, out-of-band realtime update, Retry, the dashboard error
       banner, timestamp hydration, sign-out and sign-back-in.
-      Not yet re-run green against the deployment — see the stalled-deploy item below.
+      Also 23/23 against the deployment (`BASE_URL=https://klylo-video-queue.vercel.app`).
 - [x] Fixed a hydration mismatch (React #418) the UI suite surfaced in production only:
       `toLocaleString()` during render disagreed between Vercel's UTC and the viewer's
       timezone. Now `components/local_time.tsx` via `useSyncExternalStore`. Verified against
-      a local production build; **unverified in production** while the deploy is stalled.
+      both a local production build and the deployment — the suite's "no uncaught errors in
+      the page" check is what surfaced #418 in the first place, and it now passes live.
 - [x] CI: `.github/workflows/ci.yml` runs lint + build on push and pull request
 - [x] Public GitHub repo + Vercel deploy with the two `NEXT_PUBLIC_*` env vars (the Supabase
       Vercel integration is deliberately *not* used — it injects a `service_role` key)
@@ -67,11 +68,8 @@ deployed at https://klylo-video-queue.vercel.app.
       (guaranteed, ~2 min to relink Vercel), or open a GitHub Support ticket asking them to
       garbage-collect. The `gh` token here has scopes `gist, read:org, repo, workflow` —
       no `delete_repo` — so this cannot be automated from the agent.
-- [ ] **Owner checks:** Vercel has stopped producing deployments. The last one is `5e0382d`
-      at 2026-09-02T07:34Z; the four commits pushed at 07:45 (`4c3e784`, `1efbfdd`,
-      `68fe07f`, `8856abc`) created no deployment record at all and the commit status stays
-      `pending` with zero statuses. The GitHub link is not broken by the force-push — it
-      deployed `5e0382d` fine afterwards. Consequence: the live site still serves the
-      pre-hydration-fix build. Needs the Vercel dashboard (build logs / redeploy) or a
-      `VERCEL_TOKEN`; no Vercel CLI or credentials exist on this machine.
+- [x] Vercel stalled for ~35 min after the 07:45 push (four commits, no deployment record,
+      commit status `pending` with zero statuses) while GitHub Actions fired normally on the
+      same webhooks — so the lag was Vercel-side, not a broken link. It cleared on its own:
+      `a54fc2d` deployed at 08:11Z and the backlog resolved with it. No action needed.
 - [ ] Turn *Confirm email* back ON once the reviewer is finished.

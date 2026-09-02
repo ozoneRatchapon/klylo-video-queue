@@ -122,10 +122,7 @@ npm run test:ui                   # HEADED=1 to watch it
 All four require **Authentication -> Providers -> Email -> Confirm email = OFF**, otherwise
 the throwaway test users never get a session. Every suite honours `BASE_URL`, so the worker
 and UI suites can be pointed at the deployment
-(`BASE_URL=https://klylo-video-queue.vercel.app npm run test:ui`). The worker suite passes
-there. The UI suite currently does not: the live site is still serving the build from before
-the timestamp fix below, because Vercel has stopped picking up pushes to `main` (last
-deployment `5e0382d`). The suite is green against a local production build.
+(`BASE_URL=https://klylo-video-queue.vercel.app npm run test:ui`); both pass there.
 
 ## Key decisions
 
