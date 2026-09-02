@@ -10,7 +10,8 @@
     "test:rls": "node --env-file=.env.local tests/rls_smoke.mjs",
     "test:realtime": "node --env-file=.env.local tests/realtime_smoke.mjs",
     "test:worker": "node --env-file=.env.local tests/worker_smoke.mjs",
-    "test:ui": "node --env-file=.env.local tests/ui_smoke.mjs"
+    "test:ui": "node --env-file=.env.local tests/ui_smoke.mjs",
+    "test:reaper": "node --env-file=.env.local tests/reaper_smoke.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",

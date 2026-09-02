@@ -18,14 +18,19 @@ A small Next.js 16 (App Router) + Supabase app: sign in, submit a simulated vide
 ### 1. Supabase project
 
 Create a project at [supabase.com](https://supabase.com), then open **SQL Editor** and run
-[`supabase/migrations/20260902120000_init.sql`](supabase/migrations/20260902120000_init.sql) once. It is
-idempotent and creates everything the app needs:
+the two files in [`supabase/migrations/`](supabase/migrations/) in filename order. Both are
+idempotent. The first creates everything the app needs:
 
 - `job_status` enum and the `jobs` table (+ `updated_at` trigger, index on `(user_id, created_at desc)`)
 - RLS enabled with select/insert/update/delete policies scoped to `auth.uid()`
 - `jobs` added to the `supabase_realtime` publication
 - the **private** `job-images` bucket (5 MB limit, `image/jpeg` + `image/png` only) and
   its `storage.objects` policies (`<user_id>/…` prefix ownership)
+
+The second adds the stale-job reaper: `reap_stale_jobs()` plus a `pg_cron` entry that runs it
+every minute. If `pg_cron` is unavailable on your plan the migration still succeeds — it
+raises a notice and leaves the function unscheduled, and the app works exactly as before,
+minus the recovery.
 
 Under **Authentication → Providers → Email**, turn *Confirm email* off if you want to sign
 in immediately after signing up (the UI handles both cases).
@@ -124,6 +129,16 @@ npm run dev            # in another shell
 npm run test:worker
 ```
 
+`tests/reaper_smoke.mjs` covers the stale-job reaper. It backdates a `processing` and a
+`queued` job by five minutes, checks the reaper cannot be called from a client role at all
+(it is `security definer`, so a caller would see every user's rows), then waits for cron and
+asserts both rows land on `failed` with the right explanation while a healthy in-flight job
+is left alone. Cron fires once a minute, so this one takes up to ~2 minutes.
+
+```bash
+npm run test:reaper
+```
+
 `tests/ui_smoke.mjs` drives the actual React components in headless Chromium (Playwright,
 no test runner — the same plain-node style as the others). It signs up through `AuthForm`,
 checks that `JobForm` rejects a blank prompt, a non-image and a >5 MB file without creating
@@ -150,7 +165,7 @@ npm run dev                       # in another shell
 npm run test:ui                   # HEADED=1 to watch it
 ```
 
-All four require **Authentication -> Providers -> Email -> Confirm email = OFF**, otherwise
+All five require **Authentication -> Providers -> Email -> Confirm email = OFF**, otherwise
 the throwaway test users never get a session. Every suite honours `BASE_URL`, so the worker
 and UI suites can be pointed at the deployment
 (`BASE_URL=https://klylo-video-queue.vercel.app npm run test:ui`); both pass there.
@@ -190,6 +205,20 @@ A green run is `test:rls` 7/7, `test:realtime` 5/5, `test:worker` 7/7 and `test:
 - **`app/dashboard/loading.tsx`** is the Suspense fallback for the dynamic dashboard. The
   in-page loading affordances (`Submitting…`, `Connecting…`, the `processing` progress bar,
   image skeletons) cover everything after first paint; this covers the fetch before it.
+- **A stranded job is failed, not resurrected.** The worker runs in the browser, so a job
+  can strand two ways: `processing` if the tab closes mid-run, or `queued` if the POST to
+  the worker never lands. `reap_stale_jobs()` runs every minute under `pg_cron` and fails
+  anything in either status whose `updated_at` is older than 90 s — comfortably past the
+  worst legitimate run, since the route declares `maxDuration = 60` and sleeps at most 15 s.
+  Failing them is deliberate rather than a shortcut: `failed` is exactly the status
+  `JobCard` offers Retry on, so recovery reuses the path that already exists instead of
+  adding a second one. The function is `security definer` (cron has no user session) and
+  therefore revoked from `anon` and `authenticated` — otherwise one user could fail
+  another's in-flight job.
+- **The `updated_at` trigger respects an explicit value.** It stamps `now()` only when the
+  update leaves the column alone, which is what makes "pretend this row is old" expressible
+  and the reaper testable in seconds rather than minutes. Under RLS a user can only do that
+  to their own rows.
 - **Realtime plus a catch-up refetch.** On `SUBSCRIBED` the dashboard refetches once, so
   changes that happened between the server render and the socket opening aren't missed.
 - **The realtime socket is authenticated before it joins.** Realtime enforces RLS on the
@@ -213,15 +242,10 @@ A green run is `test:rls` 7/7, `test:realtime` 5/5, `test:worker` 7/7 and `test:
 
 ## Known gaps / next steps
 
-- **A browser-driven worker is not durable.** If the tab closes mid-run, the job stays
-  `processing` forever. A real fix is a queue (`pg_cron` + a Supabase Edge Function, or
-  Vercel Queues) plus a reaper that fails jobs whose `updated_at` is older than ~60 s.
-- **A job stranded in `queued` has no Retry button.** If the `POST /api/jobs/:id/process`
-  call never lands — offline, a 500, the tab closed between the insert and the fetch — the
-  row sits at `queued` and `JobCard` only offers Retry on `failed`. The route handler
-  already accepts `queued` as a submittable status, so the server side works; only the
-  affordance is missing. The same reaper that fixes the stuck-`processing` case should
-  re-dispatch these.
+- **The reaper fails a stranded job rather than resuming it.** Recovery is a Retry button,
+  not a transparent re-dispatch, and detection takes up to ~2.5 min (90 s of staleness plus
+  the one-minute cron tick). A real queue — Vercel Queues, or `pg_cron` driving a Supabase
+  Edge Function — would own the run and resume it instead.
 - **The uploaded MIME type is client-asserted.** `JobForm` sends `contentType: file.type`
   and the bucket's `allowed_mime_types` validates that *declared* header, not the bytes, so
   arbitrary content can be stored under an `image/png` label. Low severity — objects are
